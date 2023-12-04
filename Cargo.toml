@@ -6,3 +6,19 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+tokio = { version =  "1.29.1", features = ["full"]}
+anyhow = "1.0.71"
+rand = "0.8.5"
+rsa = "0.9.2"
+rsa-der = "0.3.0"
+once_cell = "1.18.0"
+azalea-crypto = { git = "https://github.com/enderschesi/azalea.git", branch = "1.19.2" }
+azalea-chat = { git = "https://github.com/enderschesi/azalea.git", branch = "1.19.2" }
+azalea-auth = { git = "https://github.com/enderschesi/azalea.git", branch = "1.19.2" }
+uuid = "1.4.1"
+regex = "1.9.3"
+
+[dependencies.azalea-protocol]
+git = "https://github.com/enderschesi/azalea.git"
+branch = "1.19.2"
+features = []
