@@ -5,18 +5,22 @@ mod client;
 mod queue;
 mod server;
 
-use crate::client::Client;
-use crate::server::Server;
 use std::sync::Arc;
 
-use crate::queue::Queue;
 use tokio::sync::RwLock;
+
+use crate::{client::Client, queue::Queue, server::Server};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let queue = Arc::new(RwLock::new(Queue::new()));
+    let queue = Arc::new(RwLock::new(Queue::default()));
     let mut client = Client::new(queue.clone()).await;
-    let mut server = Server::new(queue.clone(), client.get_packets(), client.c2s.clone(), client.s2c.clone()).await;
+    let mut server = Server::new(
+        queue.clone(),
+        client.get_packets(),
+        client.c2s.clone(),
+        client.s2c.clone(),
+    );
 
     let is_standalone = client.is_standalone.clone();
     let server_task = tokio::spawn(async move {
