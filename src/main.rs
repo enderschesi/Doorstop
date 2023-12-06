@@ -13,6 +13,8 @@ use crate::{client::Client, queue::Queue, server::Server};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let queue = Arc::new(RwLock::new(Queue::default()));
     let mut client = Client::new(queue.clone()).await;
     let mut server = Server::new(
@@ -27,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         _ = server.listen(is_standalone).await;
     });
     let client_task = tokio::spawn(async move {
-        _ = client.connect().await;
+        client.connect().await.unwrap();
     });
 
     _ = tokio::try_join!(client_task, server_task);

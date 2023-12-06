@@ -31,6 +31,10 @@ use azalea_protocol::{
         ConnectionProtocol,
     },
 };
+use azalea_protocol::packets::configuration::{ClientboundConfigurationPacket};
+use azalea_protocol::packets::configuration::serverbound_client_information_packet::ServerboundClientInformationPacket;
+use azalea_protocol::packets::configuration::serverbound_finish_configuration_packet::ServerboundFinishConfigurationPacket;
+use azalea_protocol::packets::login::serverbound_login_acknowledged_packet::ServerboundLoginAcknowledgedPacket;
 use regex::Regex;
 use tokio::{net::TcpStream, sync::RwLock};
 
@@ -109,7 +113,7 @@ impl Client {
     #[allow(clippy::too_many_lines)]
     pub async fn connect(&mut self) -> Result<()> {
         // TODO: Add ServerAddress parameter and resolve addr
-        let stream = TcpStream::connect("51.81.4.128:25565").await?;
+        let stream = TcpStream::connect("31.25.11.130:25565").await?;
         stream.set_nodelay(true)?;
 
         let mut connection = Connection::wrap(stream);
@@ -117,7 +121,7 @@ impl Client {
         connection
             .write(
                 ClientIntentionPacket {
-                    protocol_version: 760,
+                    protocol_version: 764,
                     hostname: "2b2t.org".to_string(),
                     port: 25566,
                     intention: ConnectionProtocol::Login,
@@ -165,12 +169,29 @@ impl Client {
                 ClientboundLoginPacket::LoginCompression(packet) => {
                     connection.set_compression_threshold(packet.compression_threshold);
                     continue;
-                }
-                _ => bail!("Unexpected packet!"),
+                },
+                ClientboundLoginPacket::LoginDisconnect(packet) => bail!("Disconnected during login! Reason: {}", packet.reason.to_string()),
+                _ => {},
             }
         };
 
-        let connection = connection.configuration();
+        connection.write(ServerboundLoginAcknowledgedPacket { }.get()).await?;
+
+        let mut connection = connection.configuration();
+
+        connection.write(ServerboundClientInformationPacket { information: Default::default() }.get()).await?;
+
+        loop {
+            match connection.read().await? {
+                ClientboundConfigurationPacket::FinishConfiguration(_) =>{
+                    connection.write(ServerboundFinishConfigurationPacket {}.get()).await?;
+                    break;
+                }
+                ClientboundConfigurationPacket::Disconnect(packet) => bail!("Disconnected during configuration! Reason: {}", packet.reason.to_string()),
+                _ => {},
+            }
+        }
+
         let mut connection = connection.game();
         let mut packets = vec![];
 

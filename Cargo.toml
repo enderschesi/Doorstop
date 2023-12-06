@@ -7,11 +7,13 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-azalea-auth = { git = "https://github.com/Shays-Forks/azalea" }
-azalea-chat = { git = "https://github.com/Shays-Forks/azalea" }
+azalea-auth = { git = "https://github.com/azalea-rs/azalea.git", branch = "1.20.2" }
+azalea-chat = { git = "https://github.com/azalea-rs/azalea.git", branch = "1.20.2" }
 azalea-client = { git = "https://github.com/Shays-Forks/azalea" }
-azalea-crypto = { git = "https://github.com/Shays-Forks/azalea" }
-azalea-protocol = { git = "https://github.com/Shays-Forks/azalea" }
+azalea-crypto = { git = "https://github.com/azalea-rs/azalea.git", branch = "1.20.2" }
+azalea-protocol = { git = "https://github.com/azalea-rs/azalea.git", branch = "1.20.2" }
+azalea-core = { git = "https://github.com/azalea-rs/azalea.git", branch = "1.20.2" }
+azalea-buf = { git = "https://github.com/azalea-rs/azalea.git", branch = "1.20.2" }
 lazy_static = "1"
 rand = "0.8"
 regex = "1"
@@ -19,6 +21,7 @@ rsa = "0.9"
 rsa-der = "0.3"
 tokio = { version = "1", features = ["full"] }
 uuid = "1"
+env_logger = "0.10.1"
 
 [lints.clippy]
 pedantic = "warn"
