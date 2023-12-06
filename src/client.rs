@@ -1,36 +1,49 @@
-use crate::queue::{Queue, QueueStatus};
-use anyhow::bail as yeet;
-use azalea_auth::AuthResult;
-use azalea_protocol::connect::Connection;
-use azalea_protocol::packets::game::serverbound_accept_teleportation_packet::ServerboundAcceptTeleportationPacket;
-use azalea_protocol::packets::game::serverbound_keep_alive_packet::ServerboundKeepAlivePacket;
-use azalea_protocol::packets::game::serverbound_move_player_pos_rot_packet::ServerboundMovePlayerPosRotPacket;
-use azalea_protocol::packets::game::{ClientboundGamePacket, ServerboundGamePacket};
-use azalea_protocol::packets::handshake::client_intention_packet::ClientIntentionPacket;
-use azalea_protocol::packets::login::serverbound_hello_packet::ServerboundHelloPacket;
-use azalea_protocol::packets::login::serverbound_key_packet::{
-    NonceOrSaltSignature, ServerboundKeyPacket,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
-use azalea_protocol::packets::login::ClientboundLoginPacket;
-use azalea_protocol::packets::status::serverbound_status_request_packet::ServerboundStatusRequestPacket;
-use azalea_protocol::packets::status::ClientboundStatusPacket;
-use azalea_protocol::packets::ConnectionProtocol;
+
+use anyhow::{bail, Result};
+use azalea_auth::AuthResult;
+use azalea_protocol::{
+    connect::Connection,
+    packets::{
+        game::{
+            serverbound_accept_teleportation_packet::ServerboundAcceptTeleportationPacket,
+            serverbound_keep_alive_packet::ServerboundKeepAlivePacket,
+            serverbound_move_player_pos_rot_packet::ServerboundMovePlayerPosRotPacket,
+            ClientboundGamePacket,
+            ServerboundGamePacket,
+        },
+        handshaking::client_intention_packet::ClientIntentionPacket,
+        login::{
+            serverbound_hello_packet::ServerboundHelloPacket,
+            serverbound_key_packet::ServerboundKeyPacket,
+            ClientboundLoginPacket,
+        },
+        status::{
+            serverbound_status_request_packet::ServerboundStatusRequestPacket,
+            ClientboundStatusPacket,
+        },
+        ConnectionProtocol,
+    },
+};
 use regex::Regex;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::{net::TcpStream, sync::RwLock};
+
+use crate::queue::{Queue, Status};
 
 pub struct Client {
-    auth: AuthResult,
+    auth:    AuthResult,
     packets: Arc<RwLock<Option<Vec<ClientboundGamePacket>>>>,
 
     pub c2s: tokio::sync::broadcast::Sender<ServerboundGamePacket>,
     pub s2c: tokio::sync::broadcast::Sender<ClientboundGamePacket>,
 
-    pub is_connected: Arc<AtomicBool>,
+    pub is_connected:  Arc<AtomicBool>,
     pub is_standalone: Arc<AtomicBool>,
 
     pub queue: Arc<RwLock<Queue>>,
@@ -38,12 +51,17 @@ pub struct Client {
 
 impl Client {
     pub async fn new(queue: Arc<RwLock<Queue>>) -> Self {
-        let mut cache_path = PathBuf::new();
-        cache_path.push("accounts.cache");
+        let minecraft_dir = azalea_client::get_mc_dir::minecraft_dir().unwrap_or_else(|| {
+            panic!(
+                "No {} environment variable found",
+                azalea_client::get_mc_dir::home_env_var()
+            )
+        });
+
         let auth = azalea_auth::auth(
             std::env::var("email").unwrap().as_str(),
             azalea_auth::AuthOpts {
-                cache_file: Some(cache_path),
+                cache_file: Some(minecraft_dir.join("azalea-auth.json")),
                 ..Default::default()
             },
         )
@@ -67,14 +85,17 @@ impl Client {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_connected(&self) -> bool {
         self.is_connected.load(Ordering::Relaxed)
     }
 
+    #[allow(dead_code)]
     pub fn is_standalone(&self) -> bool {
         self.is_standalone.load(Ordering::Relaxed)
     }
 
+    #[allow(dead_code)]
     pub fn set_standalone(&self, value: bool) -> bool {
         let value_before = self.is_standalone.load(Ordering::Relaxed);
         self.is_standalone.store(value, Ordering::Relaxed);
@@ -85,10 +106,13 @@ impl Client {
         self.packets.clone()
     }
 
-    pub async fn connect(&mut self) -> anyhow::Result<()> {
-        let connection = TcpStream::connect("51.81.4.128:25565").await?;
-        connection.set_nodelay(true).unwrap();
-        let mut connection = Connection::wrap(connection);
+    #[allow(clippy::too_many_lines)]
+    pub async fn connect(&mut self) -> Result<()> {
+        // TODO: Add ServerAddress parameter and resolve addr
+        let stream = TcpStream::connect("51.81.4.128:25565").await?;
+        stream.set_nodelay(true)?;
+
+        let mut connection = Connection::wrap(stream);
 
         connection
             .write(
@@ -107,9 +131,8 @@ impl Client {
         connection
             .write(
                 ServerboundHelloPacket {
-                    username: self.auth.profile.name.clone(),
-                    public_key: None,
-                    profile_id: Some(self.auth.profile.id),
+                    name:       self.auth.profile.name.clone(),
+                    profile_id: self.auth.profile.id,
                 }
                 .get(),
             )
@@ -130,10 +153,8 @@ impl Client {
                     connection
                         .write(
                             ServerboundKeyPacket {
-                                key_bytes: e.encrypted_public_key,
-                                nonce_or_salt_signature: NonceOrSaltSignature::Nonce(
-                                    e.encrypted_nonce,
-                                ),
+                                key_bytes:           e.encrypted_public_key,
+                                encrypted_challenge: e.encrypted_nonce,
                             }
                             .get(),
                         )
@@ -145,12 +166,12 @@ impl Client {
                     connection.set_compression_threshold(packet.compression_threshold);
                     continue;
                 }
-                _ => yeet!("Unexpected packet!"),
+                _ => bail!("Unexpected packet!"),
             }
         };
 
+        let connection = connection.configuration();
         let mut connection = connection.game();
-
         let mut packets = vec![];
 
         loop {
@@ -163,11 +184,11 @@ impl Client {
                     connection
                         .write(
                             ServerboundMovePlayerPosRotPacket {
-                                x: packet.x,
-                                y: packet.y,
-                                z: packet.z,
-                                y_rot: packet.y_rot,
-                                x_rot: packet.x_rot,
+                                x:         packet.x,
+                                y:         packet.y,
+                                z:         packet.z,
+                                y_rot:     packet.y_rot,
+                                x_rot:     packet.x_rot,
                                 on_ground: false,
                             }
                             .get(),
@@ -179,21 +200,20 @@ impl Client {
                     packets.push(packet.clone());
                     continue;
                 }
-                Err(e) => {
-                    println!("An error occured! {}", *e);
+                Err(error) => {
+                    println!("An error occurred! {}", *error);
                     continue;
                 }
             }
-        };
+        }
 
         *self.packets.write().await = Some(packets);
-
 
         let (mut reader, mut writer) = connection.into_split();
 
         {
             let mut queue = self.queue.write().await;
-            queue.update_status(QueueStatus::Queueing);
+            queue.update_status(Status::Queueing);
         }
 
         // TODO: Replace these unwraps with something better
@@ -206,16 +226,22 @@ impl Client {
                 let packet = s2c_receiver.recv().await.unwrap();
 
                 if let ClientboundGamePacket::SystemChat(packet) = packet {
-                    if packet.content.to_string().contains("Connected to the server.") {
+                    if packet
+                        .content
+                        .to_string()
+                        .contains("Connected to the server.")
+                    {
                         let mut queue = queue.write().await;
-                        queue.update_status(QueueStatus::Waiting);
+                        queue.update_status(Status::Waiting);
                     }
 
-                    if queue.read().await.status() == QueueStatus::Queueing {
-                        if let Some(captures) = re_place_in_queue.captures(&packet.content.to_string()) {
+                    if queue.read().await.status() == Status::Queueing {
+                        if let Some(captures) =
+                            re_place_in_queue.captures(&packet.content.to_string())
+                        {
                             let number: u32 = captures.get(1).unwrap().as_str().parse().unwrap();
                             let mut queue = queue.write().await;
-                            queue.update_place(number)
+                            queue.update_place(number);
                         }
                     }
                 }
@@ -225,10 +251,11 @@ impl Client {
         let queue = self.queue.clone();
         let pinger_updater = tokio::spawn(async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                let connection = TcpStream::connect("51.81.4.128:25565").await.unwrap();
-                connection.set_nodelay(true).unwrap();
-                let mut connection = Connection::wrap(connection);
+                // TODO: Add ServerAddress parameter and resolve addr
+                let stream = TcpStream::connect("51.81.4.128:25565").await.unwrap();
+                stream.set_nodelay(true).unwrap();
+
+                let mut connection = Connection::wrap(stream);
 
                 connection
                     .write(
@@ -253,7 +280,7 @@ impl Client {
                 let status = loop {
                     match connection.read().await.unwrap() {
                         ClientboundStatusPacket::StatusResponse(status) => break status,
-                        _ => continue,
+                        ClientboundStatusPacket::PongResponse(_) => continue,
                     }
                 };
 
@@ -262,7 +289,7 @@ impl Client {
                 let re_priority = Regex::new(r"Priority queue: (\d+)").unwrap();
 
                 let _in_game: u32 = re_in_game
-                    .captures(status.players.sample.get(0).unwrap().name.as_str())
+                    .captures(status.players.sample.first().unwrap().name.as_str())
                     .unwrap()
                     .get(1)
                     .unwrap()
@@ -286,9 +313,9 @@ impl Client {
                     .parse()
                     .unwrap();
 
-                let mut queue = queue.write().await;
+                queue.write().await.update_length(queued);
 
-                queue.update_length(queued);
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         });
 
@@ -297,8 +324,10 @@ impl Client {
             loop {
                 let packet = c2s_receiver.recv().await.unwrap();
 
-                if let ServerboundGamePacket::AcceptTeleportation(packet) = packet.clone() && packet.id == 1 {
-                    continue
+                if let ServerboundGamePacket::AcceptTeleportation(packet) = packet.clone()
+                    && packet.id == 1
+                {
+                    continue;
                 }
 
                 writer.write(packet).await.unwrap();

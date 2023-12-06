@@ -1,34 +1,39 @@
-use std::ops::Mul;
-use std::time::{Duration, Instant};
+use std::{
+    ops::Mul,
+    time::{Duration, Instant},
+};
 
-#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
-pub enum QueueStatus {
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum Status {
     #[default]
     Idling,
     Queueing,
     Waiting,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Queue {
-    status: QueueStatus,
-    start_time: Instant,
+    status:        Status,
+    #[allow(dead_code)]
+    start_time:    Instant,
     current_place: Option<u32>,
-    length: Option<u32>,
+    length:        Option<u32>,
     place_history: Vec<(u32, Instant)>,
 }
 
-impl Queue {
-    pub fn new() -> Self {
-        Queue {
-            status: Default::default(),
-            current_place: None,
-            length: None,
-            start_time: Instant::now(),
-            place_history: vec![],
+impl Default for Queue {
+    fn default() -> Self {
+        Self {
+            status:        Status::default(),
+            start_time:    Instant::now(),
+            current_place: Option::default(),
+            length:        Option::default(),
+            place_history: Vec::default(),
         }
     }
+}
 
+impl Queue {
     pub fn update_place(&mut self, current_place: u32) {
         if self.current_place.is_some() && self.current_place.unwrap() == current_place {
             return;
@@ -39,7 +44,7 @@ impl Queue {
         self.place_history.push((current_place, current_time));
     }
 
-    pub fn current_place(&self) -> Option<u32> {
+    pub const fn current_place(&self) -> Option<u32> {
         self.current_place
     }
 
@@ -47,15 +52,15 @@ impl Queue {
         self.length = Some(length);
     }
 
-    pub fn length(&self) -> Option<u32> {
+    pub const fn length(&self) -> Option<u32> {
         self.length
     }
 
-    pub fn update_status(&mut self, status: QueueStatus) {
+    pub fn update_status(&mut self, status: Status) {
         self.status = status;
     }
 
-    pub fn status(&self) -> QueueStatus {
+    pub const fn status(&self) -> Status {
         self.status
     }
 
@@ -78,7 +83,7 @@ impl Queue {
             total_places += place_diff;
         }
 
-        let average_time_per_place = total_time.div_f64(total_places as f64);
+        let average_time_per_place = total_time.div_f64(f64::from(total_places));
         Some(average_time_per_place.mul(self.current_place.unwrap()))
     }
 }
