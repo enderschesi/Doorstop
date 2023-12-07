@@ -11,6 +11,11 @@ use azalea_auth::AuthResult;
 use azalea_protocol::{
     connect::Connection,
     packets::{
+        configuration::{
+            serverbound_client_information_packet::ServerboundClientInformationPacket,
+            serverbound_finish_configuration_packet::ServerboundFinishConfigurationPacket,
+            ClientboundConfigurationPacket,
+        },
         game::{
             serverbound_accept_teleportation_packet::ServerboundAcceptTeleportationPacket,
             serverbound_keep_alive_packet::ServerboundKeepAlivePacket,
@@ -22,6 +27,7 @@ use azalea_protocol::{
         login::{
             serverbound_hello_packet::ServerboundHelloPacket,
             serverbound_key_packet::ServerboundKeyPacket,
+            serverbound_login_acknowledged_packet::ServerboundLoginAcknowledgedPacket,
             ClientboundLoginPacket,
         },
         status::{
@@ -31,10 +37,6 @@ use azalea_protocol::{
         ConnectionProtocol,
     },
 };
-use azalea_protocol::packets::configuration::{ClientboundConfigurationPacket};
-use azalea_protocol::packets::configuration::serverbound_client_information_packet::ServerboundClientInformationPacket;
-use azalea_protocol::packets::configuration::serverbound_finish_configuration_packet::ServerboundFinishConfigurationPacket;
-use azalea_protocol::packets::login::serverbound_login_acknowledged_packet::ServerboundLoginAcknowledgedPacket;
 use regex::Regex;
 use tokio::{net::TcpStream, sync::RwLock};
 
@@ -169,26 +171,43 @@ impl Client {
                 ClientboundLoginPacket::LoginCompression(packet) => {
                     connection.set_compression_threshold(packet.compression_threshold);
                     continue;
-                },
-                ClientboundLoginPacket::LoginDisconnect(packet) => bail!("Disconnected during login! Reason: {}", packet.reason.to_string()),
-                _ => {},
+                }
+                ClientboundLoginPacket::LoginDisconnect(packet) => bail!(
+                    "Disconnected during login! Reason: {}",
+                    packet.reason.to_string()
+                ),
+                _ => {}
             }
         };
 
-        connection.write(ServerboundLoginAcknowledgedPacket { }.get()).await?;
+        connection
+            .write(ServerboundLoginAcknowledgedPacket {}.get())
+            .await?;
 
         let mut connection = connection.configuration();
 
-        connection.write(ServerboundClientInformationPacket { information: Default::default() }.get()).await?;
+        connection
+            .write(
+                ServerboundClientInformationPacket {
+                    information: Default::default(),
+                }
+                .get(),
+            )
+            .await?;
 
         loop {
             match connection.read().await? {
-                ClientboundConfigurationPacket::FinishConfiguration(_) =>{
-                    connection.write(ServerboundFinishConfigurationPacket {}.get()).await?;
+                ClientboundConfigurationPacket::FinishConfiguration(_) => {
+                    connection
+                        .write(ServerboundFinishConfigurationPacket {}.get())
+                        .await?;
                     break;
                 }
-                ClientboundConfigurationPacket::Disconnect(packet) => bail!("Disconnected during configuration! Reason: {}", packet.reason.to_string()),
-                _ => {},
+                ClientboundConfigurationPacket::Disconnect(packet) => bail!(
+                    "Disconnected during configuration! Reason: {}",
+                    packet.reason.to_string()
+                ),
+                _ => {}
             }
         }
 
