@@ -1,4 +1,3 @@
-#![feature(div_duration)]
 #![feature(let_chains)]
 
 mod client;
@@ -16,8 +15,8 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let queue = Arc::new(RwLock::new(Queue::default()));
-    let mut client = Client::new(queue.clone()).await;
-    let mut server = Server::new(
+    let client = Client::new(queue.clone()).await;
+    let server = Server::new(
         queue.clone(),
         client.get_packets(),
         client.c2s.clone(),

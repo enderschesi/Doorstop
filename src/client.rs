@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use azalea_auth::AuthResult;
+use azalea_client::ClientInformation;
 use azalea_protocol::{
     connect::Connection,
     packets::{
@@ -57,15 +58,19 @@ pub struct Client {
 
 impl Client {
     pub async fn new(queue: Arc<RwLock<Queue>>) -> Self {
-        let minecraft_dir = azalea_client::get_mc_dir::minecraft_dir().unwrap_or_else(|| {
+        let Some(minecraft_dir) = minecraft_folder_path::minecraft_dir() else {
             panic!(
                 "No {} environment variable found",
-                azalea_client::get_mc_dir::home_env_var()
+                minecraft_folder_path::home_env_var()
             )
-        });
+        };
+
+        let Ok(email) = std::env::var("email") else {
+            panic!("No email environment variable found")
+        };
 
         let auth = azalea_auth::auth(
-            std::env::var("email").unwrap().as_str(),
+            email.as_str(),
             azalea_auth::AuthOpts {
                 cache_file: Some(minecraft_dir.join("azalea-auth.json")),
                 ..Default::default()
@@ -113,7 +118,7 @@ impl Client {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub async fn connect(&mut self) -> Result<()> {
+    pub async fn connect(&self) -> Result<()> {
         // TODO: Add ServerAddress parameter and resolve addr
         let stream = TcpStream::connect("31.25.11.130:25565").await?;
         stream.set_nodelay(true)?;
@@ -147,7 +152,7 @@ impl Client {
         let _game_profile = loop {
             match connection.read().await? {
                 ClientboundLoginPacket::Hello(packet) => {
-                    let e = azalea_crypto::encrypt(&packet.public_key, &packet.nonce).unwrap();
+                    let e = azalea_crypto::encrypt(&packet.public_key, &packet.challenge).unwrap();
                     connection
                         .authenticate(
                             self.auth.access_token.as_str(),
@@ -160,7 +165,7 @@ impl Client {
                         .write(
                             ServerboundKeyPacket {
                                 key_bytes:           e.encrypted_public_key,
-                                encrypted_challenge: e.encrypted_nonce,
+                                encrypted_challenge: e.encrypted_challenge,
                             }
                             .get(),
                         )
@@ -189,7 +194,7 @@ impl Client {
         connection
             .write(
                 ServerboundClientInformationPacket {
-                    information: Default::default(),
+                    information: ClientInformation::default(),
                 }
                 .get(),
             )
