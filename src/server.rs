@@ -77,7 +77,7 @@ impl Server {
         }
     }
 
-    pub async fn listen(&mut self, _is_standalone: Arc<AtomicBool>) -> Result<()> {
+    pub async fn listen(&self, _is_standalone: Arc<AtomicBool>) -> Result<()> {
         // TODO: Move addr to a variable
         let listener = TcpListener::bind("0.0.0.0:25565").await?;
 
@@ -89,7 +89,7 @@ impl Server {
     }
 
     async fn format_description(&self) -> String {
-        let queue = self.queue.read().await;
+        let queue = self.queue.read().await.clone();
         match queue.status() {
             Status::Idling => {
                 String::from("                       &c&lIdling...                       ")
@@ -215,7 +215,7 @@ impl Server {
         &self,
         mut connection: Connection<ServerboundLoginPacket, ClientboundLoginPacket>,
     ) -> Result<()> {
-        let nonce = Vec::from(OsRng.gen::<[u8; 16]>());
+        let challenge = Vec::from(OsRng.gen::<[u8; 16]>());
         let hello = loop {
             match connection.read().await? {
                 ServerboundLoginPacket::Hello(packet) => break packet,
@@ -227,12 +227,13 @@ impl Server {
         connection
             .write(
                 ClientboundHelloPacket {
-                    server_id:  String::new(),
-                    public_key: public_key_to_der(
+                    server_id:           String::new(),
+                    public_key:          public_key_to_der(
                         &PUBLIC_KEY.n().to_bytes_be(),
                         &PUBLIC_KEY.e().to_bytes_be(),
                     ),
-                    nonce:      nonce.clone(),
+                    challenge:           challenge.clone(),
+                    should_authenticate: false,
                 }
                 .get(),
             )
@@ -312,7 +313,8 @@ impl Server {
         connection
             .write(
                 ClientboundGameProfilePacket {
-                    game_profile: game_profile.clone(),
+                    game_profile:          game_profile.clone(),
+                    strict_error_handling: false,
                 }
                 .get(),
             )
